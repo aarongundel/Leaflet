@@ -1,3 +1,8 @@
+/**
+ * Most of the credit for this Layer goes to DGuidi in https://gist.github.com/1716010.  
+ * I built off of his work and added TMS like support for GeoJSON layers.
+ */
+
 L.TileLayer.Canvas.GeoJSON = L.TileLayer.Canvas.extend({
 	// set default options
 	options: {
@@ -38,7 +43,12 @@ L.TileLayer.Canvas.GeoJSON = L.TileLayer.Canvas.extend({
 		L.Util.setOptions(this, params);
 	},
 
-	nop: function () {},
+	/**
+	 * Main entry point.  Draws the GeoJSON tile at tilepoint on the canvas.
+	 * @param {Object} canvas
+	 * @param {L.Point} tilePoint
+	 * @param {Number} zoom
+	 */
 
 	drawTile: function (canvas, tilePoint, zoom) {
 		var ctx = {
@@ -53,6 +63,14 @@ L.TileLayer.Canvas.GeoJSON = L.TileLayer.Canvas.extend({
 		this._draw(ctx);
 	},
 
+	/** 
+	 * Parse JSON for older browsers. (I'm looking at you IE.)
+	 * From json2.js
+	 * @param {String} text
+	 * @param {Function} reviver
+	 * 
+	 * @returns {Object}
+	 */ 
 	_parse: function (text, reviver) {
 		var j;
 
@@ -97,6 +115,14 @@ L.TileLayer.Canvas.GeoJSON = L.TileLayer.Canvas.extend({
 		throw new SyntaxError('JSON.parse');
 	},
 
+	/** 
+	 * Use the XHR to retrieve our JSON data to be displayed.
+	 * @param {String} url
+	 * @param {Function} callback
+	 * @param {String} mimeType
+	 *
+	 * @returns {Object}
+	 */ 
 	_request: function (url, callback, mimeType) {
 		var req;
 
@@ -117,6 +143,8 @@ L.TileLayer.Canvas.GeoJSON = L.TileLayer.Canvas.extend({
 			req = getXHR();
 			if (mimeType && req.overrideMimeType) {
 				req.overrideMimeType(mimeType);
+			} else {
+				req.overrideMimeType("application/json")
 			}
 			req.open("GET", url, true);
 			req.onreadystatechange = function (e) {
@@ -310,6 +338,10 @@ L.TileLayer.Canvas.GeoJSON = L.TileLayer.Canvas.extend({
 		}
 	},
 
+	 /**
+	  * Draws the a tile at the point provided in ctx.  
+	  * @param {Object} ctx
+	  */
 	_draw: function (ctx) {
 
 		var loader = this._request, 
@@ -365,6 +397,15 @@ L.TileLayer.Canvas.GeoJSON = L.TileLayer.Canvas.extend({
 			}
 		});
 	},
+
+	/**
+	 * Styling for the GeoJSON Object.  If you want to do
+	 * some kind of per-feature styling, use the callback to
+	 * return the necessary styles.
+	 * @param {Object} feature - the GeoJSON feature being drawn
+	 *
+	 * @return {Object} style
+	 */
 	styleFor: function (feature) {
 		var type = feature.geometry.type;
 		if (this.options.style.callback) {
