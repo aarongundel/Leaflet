@@ -1,26 +1,24 @@
-L.TileLayer.Canvas.GeoJSON = L.TileLayer.extend({
+L.TileLayer.Canvas.GeoJSON = L.TileLayer.Canvas.extend({
+	// set default options
 	options: {
-		debug: false
+		debug: true,
+		tileSize: 256
 	},
 
 	initialize: function (url, options) { // (String, Object)
 		this._url = url;
 
-		L.Util.setOptions(this, options);
+		var params = L.Util.extend({}, this.options);
+
+		for (var i in options) {
+			if (!this.options.hasOwnProperty(i)) {
+				params[i] = options[i];
+			}
+		}
+
+		L.Util.setOptions(this, params);
 	},
 
-	_getXHR: function () {
-		if (window.XMLHttpRequest
-			&& ('file:' !== window.location.protocol || !window.ActiveXObject)) {
-			return new XMLHttpRequest();
-		} else {
-			try { return new ActiveXObject('Microsoft.XMLHTTP'); } catch (e) {}
-			try { return new ActiveXObject('Msxml2.XMLHTTP.6.0'); } catch (e) {}
-			try { return new ActiveXObject('Msxml2.XMLHTTP.3.0'); } catch (e) {}
-			try { return new ActiveXObject('Msxml2.XMLHTTP'); } catch (e) {}
-		}
-		return false;
-	},
 
 	drawTile: function (canvas, tilePoint, zoom) {
 		var ctx = {
@@ -29,7 +27,7 @@ L.TileLayer.Canvas.GeoJSON = L.TileLayer.extend({
 			zoom: zoom
 		};
 
-		if (this.params.debug) {
+		if (this.options.debug) {
 			this._drawDebugInfo(ctx);
 		}
 		this._draw(ctx);
@@ -38,27 +36,35 @@ L.TileLayer.Canvas.GeoJSON = L.TileLayer.extend({
 	_request: function (url, callback, mimeType) {
 		var req;
 
+		function getXHR () {
+			if (window.XMLHttpRequest
+				&& ('file:' !== window.location.protocol || !window.ActiveXObject)) {
+				return new XMLHttpRequest();
+			} else {
+				try { return new ActiveXObject('Microsoft.XMLHTTP'); } catch (e) {}
+				try { return new ActiveXObject('Msxml2.XMLHTTP.6.0'); } catch (e) {}
+				try { return new ActiveXObject('Msxml2.XMLHTTP.3.0'); } catch (e) {}
+				try { return new ActiveXObject('Msxml2.XMLHTTP'); } catch (e) {}
+			}
+			return false;
+		}
+
 		function send () {
-			req = _getXHR();
+			req = getXHR();
 			if (mimeType && req.overrideMimeType) {
 				req.overrideMimeType(mimeType);
 			}
 			req.open("GET", url, true);
 			req.onreadystatechange = function (e) {
 				if (req.readyState === 4) {
-					active--;
 					if (req.status < 300) {
 						callback(req);
 					}
-					process();
 				}
 			};
 			req.send(null);
 		}
 		function abort (hard) {
-			if (dequeue(send)) {
-				return true;
-			}
 			if (hard && req) {
 				req.abort(); return true;
 			}
@@ -70,7 +76,7 @@ L.TileLayer.Canvas.GeoJSON = L.TileLayer.extend({
 
 	_tilePoint: function (ctx, coords) {
 		// start coords to tile 'space'
-		var s = ctx.tile.multiplyBy(this.tileSize), p, x, y;
+		var s = ctx.tile.multiplyBy(this.options.tileSize), p, x, y;
 
 		// actual coords to tile 'space'
 		p = this._map.project(new L.LatLng(coords[1], coords[0]));
@@ -194,15 +200,16 @@ L.TileLayer.Canvas.GeoJSON = L.TileLayer.extend({
 	},
 
 	_drawPolygon: function (ctx, geom, style) {
-		
-		var el, g, coords, outline, method;
+
+		var el, g, coords, outline, method, i, proj;
 
 		if (!style) {
 			return;
 		}
 		
 		for (el = 0; el < geom.length; el++) {
-			coords = geom[el], proj = [], i;
+			coords = geom[el];
+			proj = [];
 			coords = this._clip(ctx, coords);
 			for (i = 0; i < coords.length; i++) {
 				proj.push(this._tilePoint(ctx, coords[i]));
@@ -233,53 +240,89 @@ L.TileLayer.Canvas.GeoJSON = L.TileLayer.extend({
 
 	_draw: function (ctx) {
 
-		var loader = _request, 
+		var loader = this._request, 
 			url = this.getTileUrl(ctx.tile, ctx.zoom),
-			self = this, j;
+			self = this, j, geoJSON;
 
 		loader(url, function (data) {
-			for (var i = 0; i < data.features.length; i++) {
-				var feature = data.features[i];
-				var style = self.styleFor(feature);
 
-				var type = feature.geometry.type;
-				var geom = feature.geometry.coordinates;
-				var len = geom.length;
-				switch (type) {
-					case 'Point':
-						self._drawPoint(ctx, geom, style);
-						break;
+			var feature, style, type, geom, len, i;
 
-					case 'MultiPoint':
-						for (j = 0; j < len; j++) {
-							self._drawPoint(ctx, geom[j], style);
-						}
-						break;
+			data = JSON.parse(data.response)
+			for (i = 0; i < data.features.length; i++) {
+				feature = data.features[i];
+				style = self.styleFor(feature);
+				type = feature.geometry.type;
+				geom = feature.geometry.coordinates;
+				if(geom) {
+					len = geom.length;
+					switch (type) {
+						case 'Point':
+							self._drawPoint(ctx, geom, style);
+							break;
 
-					case 'LineString':
-						self._drawLineString(ctx, geom, style);
-						break;
+						case 'MultiPoint':
+							for (j = 0; j < len; j++) {
+								self._drawPoint(ctx, geom[j], style);
+							}
+							break;
 
-					case 'MultiLineString':
-						for (j = 0; j < len; j++) {
-							self._drawLineString(ctx, geom[j], style);
-						}
-						break;
+						case 'LineString':
+							self._drawLineString(ctx, geom, style);
+							break;
 
-					case 'Polygon':
-						self._drawPolygon(ctx, geom, style);
-						break;
+						case 'MultiLineString':
+							for (j = 0; j < len; j++) {
+								self._drawLineString(ctx, geom[j], style);
+							}
+							break;
 
-					case 'MultiPolygon':
-						for (j = 0; j < len; j++) {
-							self._drawPolygon(ctx, geom[j], style);
-						}
-						break;
+						case 'Polygon':
+							self._drawPolygon(ctx, geom, style);
+							break;
 
-					default:
-						throw new Error('Unmanaged type: ' + type);
+						case 'MultiPolygon':
+							for (j = 0; j < len; j++) {
+								self._drawPolygon(ctx, geom[j], style);
+							}
+							break;
+
+						default:
+							throw new Error('Unmanaged type: ' + type);
+					}
 				}
 			}
-		}, "application/json");
-	}
+		}, "application/json").send();
+	},
+	styleFor: function (feature) {
+        var type = feature.geometry.type;
+        switch (type) {
+            case 'Point':
+            case 'MultiPoint':
+                return {
+                    color: 'rgba(252,146,114,0.6)',
+                    radius: 5
+                };
+                
+            case 'LineString':
+            case 'MultiLineString':
+                return {
+                    color: 'rgba(161,217,155,0.8)',
+                    size: 3
+                };
+
+            case 'Polygon':
+            case 'MultiPolygon':
+                return {
+                    color: 'rgba(43,140,190,0.4)',
+                    outline: {
+                        color: 'rgb(0,0,0)',
+                        size: 1
+                    }
+                };
+
+            default:
+                return null;
+        }
+    }
 });
