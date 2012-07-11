@@ -1,16 +1,35 @@
 L.TileLayer.Canvas.GeoJSON = L.TileLayer.Canvas.extend({
 	// set default options
 	options: {
-		debug: true,
-		tileSize: 256
+		debug: false,
+		tileSize: 256,
+		style: {
+			point: {
+				color: 'rgba(252,146,114,0.6)',
+				radius: 5
+			},
+			line: {
+				color: 'rgba(161,217,155,0.8)',
+				size: 3
+			},
+			polygon: {
+				color: 'rgba(43,140,190,0.4)',
+				outline: {
+					color: 'rgb(0,0,0)',
+					size: 1
+				}
+			},
+			callback: null
+		}
 	},
 
 	initialize: function (url, options) { // (String, Object)
+
+		var params = L.Util.extend({}, this.options), i;
+
 		this._url = url;
 
-		var params = L.Util.extend({}, this.options);
-
-		for (var i in options) {
+		for (i in options) {
 			if (!this.options.hasOwnProperty(i)) {
 				params[i] = options[i];
 			}
@@ -19,6 +38,7 @@ L.TileLayer.Canvas.GeoJSON = L.TileLayer.Canvas.extend({
 		L.Util.setOptions(this, params);
 	},
 
+	nop: function () {},
 
 	drawTile: function (canvas, tilePoint, zoom) {
 		var ctx = {
@@ -33,10 +53,54 @@ L.TileLayer.Canvas.GeoJSON = L.TileLayer.Canvas.extend({
 		this._draw(ctx);
 	},
 
+	_parse: function (text, reviver) {
+		var j;
+
+		function walk(holder, key) {
+
+			var k, v, value = holder[key];
+			if (value && typeof value === 'object') {
+				for (k in value) {
+					if (Object.prototype.hasOwnProperty.call(value, k)) {
+						v = walk(value, k);
+						if (v !== undefined) {
+							value[k] = v;
+						} else {
+							delete value[k];
+						}
+					}
+				}
+			}
+			return reviver.call(holder, key, value);
+		}
+
+		text = String(text);
+		cx.lastIndex = 0;
+		if (cx.test(text)) {
+			text = text.replace(cx, function (a) {
+				return '\\u' +
+					('0000' + a.charCodeAt(0).toString(16)).slice(-4);
+			});
+		}
+
+		if (/^[\],:{}\s]*$/
+				.test(text.replace(/\\(?:["\\\/bfnrt]|u[0-9a-fA-F]{4})/g, '@')
+					.replace(/"[^"\\\n\r]*"|true|false|null|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?/g, ']')
+					.replace(/(?:^|:|,)(?:\s*\[)+/g, ''))) {
+
+			j = eval('(' + text + ')');
+			return typeof reviver === 'function'
+				? walk({'': j}, '')
+				: j;
+		}
+
+		throw new SyntaxError('JSON.parse');
+	},
+
 	_request: function (url, callback, mimeType) {
 		var req;
 
-		function getXHR () {
+		function getXHR() {
 			if (window.XMLHttpRequest
 				&& ('file:' !== window.location.protocol || !window.ActiveXObject)) {
 				return new XMLHttpRequest();
@@ -49,28 +113,34 @@ L.TileLayer.Canvas.GeoJSON = L.TileLayer.Canvas.extend({
 			return false;
 		}
 
-		function send () {
+		function send() {
 			req = getXHR();
 			if (mimeType && req.overrideMimeType) {
 				req.overrideMimeType(mimeType);
 			}
 			req.open("GET", url, true);
 			req.onreadystatechange = function (e) {
+				var data;
 				if (req.readyState === 4) {
 					if (req.status < 300) {
-						callback(req);
+						if(JSON) {
+							data = JSON.parse(req.response);
+						} else {
+							data = this._parse(req.response);
+						}
+						callback(data);
 					}
 				}
 			};
 			req.send(null);
 		}
-		function abort (hard) {
+		function abort(hard) {
 			if (hard && req) {
 				req.abort(); return true;
 			}
 			return false;
 		}
-
+		send();
 		return {abort: abort,send: send};
 	},
 
@@ -131,20 +201,20 @@ L.TileLayer.Canvas.GeoJSON = L.TileLayer.Canvas.extend({
 		if (this.options.debug) {
 			console.log(diff0 + ' ' + diff1);
 		}
-		
+
 		visible = diff0 > 1 || diff1 > 1;
 
 		return visible;
 	},
 
 	_drawPoint: function (ctx, geom, style) {
-		
+
 		var p, c, g;
 
 		if (!style) {
 			return;
 		}
-		
+
 		p = this._tilePoint(ctx, geom);
 		c = ctx.canvas;
 		g = c.getContext('2d');
@@ -160,7 +230,7 @@ L.TileLayer.Canvas.GeoJSON = L.TileLayer.Canvas.extend({
 		if (!style) {
 			return;
 		}
-		
+
 		var coords = geom, proj = [], i, g;
 		coords = this._clip(ctx, coords);
 		coords = L.LineUtil.simplify(coords, 1);
@@ -206,14 +276,16 @@ L.TileLayer.Canvas.GeoJSON = L.TileLayer.Canvas.extend({
 		if (!style) {
 			return;
 		}
-		
+
 		for (el = 0; el < geom.length; el++) {
 			coords = geom[el];
 			proj = [];
 			coords = this._clip(ctx, coords);
+
 			for (i = 0; i < coords.length; i++) {
 				proj.push(this._tilePoint(ctx, coords[i]));
 			}
+
 			if (!this._isActuallyVisible(proj)) {
 				continue;
 			}
@@ -248,7 +320,6 @@ L.TileLayer.Canvas.GeoJSON = L.TileLayer.Canvas.extend({
 
 			var feature, style, type, geom, len, i;
 
-			data = JSON.parse(data.response)
 			for (i = 0; i < data.features.length; i++) {
 				feature = data.features[i];
 				style = self.styleFor(feature);
@@ -292,37 +363,28 @@ L.TileLayer.Canvas.GeoJSON = L.TileLayer.Canvas.extend({
 					}
 				}
 			}
-		}, "application/json").send();
+		});
 	},
 	styleFor: function (feature) {
-        var type = feature.geometry.type;
-        switch (type) {
-            case 'Point':
-            case 'MultiPoint':
-                return {
-                    color: 'rgba(252,146,114,0.6)',
-                    radius: 5
-                };
-                
-            case 'LineString':
-            case 'MultiLineString':
-                return {
-                    color: 'rgba(161,217,155,0.8)',
-                    size: 3
-                };
+		var type = feature.geometry.type;
+		if (this.options.style.callback) {
+			return this.options.style.callback(feature);
+		}
+		switch (type) {
+			case 'Point':
+			case 'MultiPoint':
+				return this.options.style.point;
 
-            case 'Polygon':
-            case 'MultiPolygon':
-                return {
-                    color: 'rgba(43,140,190,0.4)',
-                    outline: {
-                        color: 'rgb(0,0,0)',
-                        size: 1
-                    }
-                };
+			case 'LineString':
+			case 'MultiLineString':
+				return this.options.style.line; 
 
-            default:
-                return null;
-        }
-    }
+			case 'Polygon':
+			case 'MultiPolygon':
+				return this.options.style.polygon;
+
+			default:
+				return null;
+		}
+	}
 });
