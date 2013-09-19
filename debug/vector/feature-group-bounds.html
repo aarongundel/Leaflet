@@ -34,7 +34,7 @@
 			layers: [cloudmade]
 		});
 
-		var geojson = L.geoJson(geojsonSample, {
+		var geojson = new L.GeoJSON(geojsonSample, {
 			
 			style: function (feature) {
 				return {color: feature.properties.color};
